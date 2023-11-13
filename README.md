@@ -7,6 +7,7 @@ There are some issues with the code.
 1. It cannot parse the converted Panalytical file in .csv format as-received. You first need to delete the row starting with the word "Divergence". This row will cause error in parse the file.
 2. The prompts are not 100% clear, please carefully read the prompt for information to give the correct input. Incorrect input will not cause the code to stop working, but will be confusing for you to read later. I hope to fix this later.
 3. The Chi-square value is quite low for my test datasets, although the fitting it visually quite good and for single diffraction peaks R-squared values are >0.999 for the datasets that I've tested on single crystal diamond peaks. I am not sure what the issue is the chi-squared yet, but I suspect it's related to the large number of data points that don't contain the diffraction peak. I hope to address this in future versions.
+4. The script cannot model multiple peaks, and currently only tries to model using Voigt functions (a convolution of Gaussian and Lorentzian curves). I hope to update the code later with multiple peak fitting, as well as the option to fit using Gaussian or Lorenztian.
 
 Some additional notes related to using the code and its output:
 1. Testing: I have only tested this script on Windows systems using Spyder v5.4.3 in Anaconda.
