@@ -1,0 +1,155 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Nov  2 14:47:14 2023
+
+@author: Elias Garratt and Tia Gray
+"""
+
+## Make sure you change the input and save file information before running this code ##
+## Note that this code is currently written to take in csv's generated from Panalyticals files
+## the file intake section will need to be modified to take csvsexported from other propritary software, i.e., Rigaku ##
+## These are mostly file saves and graph labels ##
+
+import pandas as pd
+import csv
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import curve_fit
+from scipy.special import wofz
+
+# Specify the string that marks the header
+header_string = "Angle"
+
+# Initialize a list to store the data rows
+data_rows = []
+
+# Prompt for file path from user, then use this file path to parse the data
+file_path = input("Please enter the file path of the x-ray rocking curve (XRC) data you would like to process:")
+# Remove any double quotes from the file path
+file_path = file_path.replace('"', '')
+with open(file_path, 'r', newline='') as csvfile:
+    reader = csv.reader(csvfile)
+    
+    # Variable to indicate if the header has been found
+    header_found = False
+    
+    for row in reader:
+        # Check if the header string is in the row
+        if header_string in row:
+            # Set header_found to True and continue to the next row
+            header_found = True
+            continue
+        
+        # If header is found, add the row to data_rows
+        if header_found:
+            data_rows.append(row)
+
+# Convert the list of data rows into a DataFrame
+xrcfile = pd.DataFrame(data_rows, columns=None)  # Assumes no header row in data
+
+col_names = ["Omega", "Thingy", "Intensity", "residual"]
+
+xrcfile.columns = col_names
+xrcfile = xrcfile.drop(columns = "Thingy")
+xrcfile = xrcfile.astype(float)
+
+# Print the DataFrame
+print("The original RSM file is: \n",xrcfile,"\n")
+
+# Find the row with the maximum Intensity value
+max_intensity_row = xrcfile.loc[xrcfile['Intensity'].idxmax()]
+
+# Get the values and column names
+values = max_intensity_row.values
+columns = max_intensity_row.index
+
+# Create a dictionary to store the values with their corresponding column names
+data_dict = {column: value for column, value in zip(columns, values)}
+print("The row containing the values used to center and generate the data slice is: \n",data_dict,"\n")
+
+# manipulate 2Theta, Omega, Qx, and Qy columns to correct their (x, y) zeros to the location of the maximum intensity value
+xrcfile['Omega_centered'] = xrcfile['Omega']-data_dict['Omega']
+xrcfile['Omega_arcsecond'] = xrcfile['Omega_centered']*3600
+xrcfile['Intensity_normalized'] = xrcfile['Intensity']/data_dict['Intensity']
+
+# Define the Voigt model function (convolution of Gaussian and Lorentzian)
+def voigt_function(x, amplitude, center, sigma, gamma):
+    z = ((x - center) + 1j*gamma) / (sigma * np.sqrt(2))
+    return amplitude * np.real(wofz(z))
+
+# Extract the x & y from the “xrcfile” data
+x = xrcfile['Omega_arcsecond']
+y = xrcfile['Intensity_normalized']
+
+# Voigt fitting
+initial_guess = [np.max(y), np.mean(x), 1, 1]
+params_fit, pcov = curve_fit(voigt_function, x, y, p0=initial_guess)
+
+amplitude_fit, center_fit, sigma_fit, gamma_fit = params_fit # Extracting fitted parameters
+fwhm = 2 * np.sqrt(2 * np.log(2)) * sigma_fit # Calculate FWHM from the Voigt parameters
+
+# Calculate w_g, w_l, y_0, x_c, A, and r^2
+w_g = gamma_fit * 2
+w_l = sigma_fit * 2
+y_0 = amplitude_fit
+x_c = center_fit
+A = y_0 * w_g / (np.pi * w_l)
+residuals = y - voigt_function(x, *params_fit)
+r_squared = 1 - (np.var(residuals) / np.var(y))
+
+# Calculate Voigt function values for the entire x range
+# Add the Voigt function values as a new column in the DataFrame
+voigt_values = voigt_function(x, amplitude_fit, center_fit, sigma_fit, gamma_fit)
+xrcfile['Voigt_values'] = voigt_values
+print("The updated XRC datafile is: \n", xrcfile)
+
+# saving the file + fitting
+user_input_data = input("Enter a name for the processed DataFrame: ")
+file_name_data = user_input_data + '.csv'
+xrcfile.to_csv(file_name_data, index=False)
+
+# Plot the data and the fitted Voigt peak
+user_plot_title = input("Enter a title for this XRC plot: ")
+user_title = user_plot_title
+plt.plot(x, y, marker='.', ls='', ms=7, mec='black', label='Data')
+plt.plot(x, voigt_function(x, *params_fit), 'r-', label='Voigt Fit')
+plt.xlabel('Subtended Angle (arcseconds)')
+plt.ylabel('Normalized Intensity')
+plt.title(f'{user_title}')
+plt.grid(True)
+plt.legend()
+# save figure
+user_input_fig = input("Enter a name for this figure: ")
+file_name_fig = user_input_fig + '.svg'
+# Save the DataFrame as a SVG file
+plt.savefig(file_name_fig, format='svg')
+plt.show()
+
+# Set fit parameters
+fwhm_value = np.round(fwhm, decimals=4)
+gaussian_value = np.round(w_g, decimals=4)
+lorenztian_value = np.round(w_l, decimals=4)
+height_value = np.round(y_0, decimals=4)
+centroid_value = np.round(x_c, decimals=4)
+area_value = np.round(A, decimals=4)
+
+# check for goodness of fit with adjusted Chi-squared and R-squraed
+rsquare_value = np.round(r_squared, decimals=4)
+def chi2(x, y, voigt_function, params_fit):
+ 	return 1/(len(x)-len(params_fit)) * sum((voigt_function(x, *params_fit)-y)**2)
+print("The adjusted chi-squared value is: ",chi2(x, y, voigt_function, params_fit))
+chi2_value = np.round(chi2(x, y, voigt_function, params_fit), decimals=4)
+
+# create saved parameter value file
+parameter_values = [fwhm_value, gaussian_value, lorenztian_value, height_value, centroid_value, area_value, rsquare_value, chi2_value]
+parameter_values = np.array(parameter_values).reshape(-1,1)
+row_labels = ['FWHM', 'Gaussian Width', 'Lorenztian Width', 'Peak Height', 'Peak Centroid', 'Area', 'R-squared Fit', 'Adjusted Chi-squared']
+parameter_xrcfile = pd.DataFrame(data=parameter_values, index=row_labels)
+print(parameter_xrcfile)
+
+# save paramesters file
+user_input_pamams = input("Enter a name for the Fitting Parameters DataFrame: ")
+param_file_name = user_input_pamams + '.csv'
+parameter_xrcfile.to_csv(param_file_name, index=False)
+
+print(f"Your data has been saved as {file_name_data}, {file_name_fig}, and {param_file_name}")
